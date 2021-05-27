@@ -4,6 +4,7 @@ import android.security.keystore.KeyProperties
 import java.security.*
 import java.security.interfaces.ECPrivateKey
 import java.security.interfaces.ECPublicKey
+import java.security.interfaces.RSAPrivateKey
 import java.security.interfaces.RSAPublicKey
 import java.security.spec.MGF1ParameterSpec
 import javax.crypto.Cipher
@@ -181,7 +182,7 @@ fun SecKeyCreateEncryptedData(key: Key, algorithm: SecKeyAlgorithm, plaintext: B
                         "SHA-256",
                         "MGF1",
                         MGF1ParameterSpec.SHA256,
-                        PSource.PSpecified.DEFAULT,
+                        PSource.PSpecified.DEFAULT
                     )
                 )
             }
@@ -249,6 +250,53 @@ fun SecKeyCreateDecryptedData(key: Key, algorithm: SecKeyAlgorithm, ciphertext: 
             cipher.init(Cipher.DECRYPT_MODE, aesGcmKey, gcmParameterSpec)
 
             return cipher.doFinal(encryptedDataAndGcmTag)
+        }
+        SecKeyAlgorithm.RSA_ENCRYPTION_OAEP_SHA_256_AES_GCM -> {
+            val privateKey = key as? RSAPrivateKey ?: throw java.lang.IllegalArgumentException(
+                "Expected RSA private key"
+            )
+
+            // Extract the encrypted AES-GCM Secret Key, the encrypted data and the GCM tag
+            val encryptedAesGcmKey = ciphertext.copyOfRange(0, 256)
+            val encryptedDataAndGcmTag = ciphertext.copyOfRange(256, ciphertext.size)
+
+            // Unwrap/Decrypt AES GCM Key with private key
+            val rsaCipher = Cipher.getInstance("RSA/ECB/OAEPPadding").apply {
+                init(
+                    Cipher.UNWRAP_MODE,
+                    privateKey,
+                    OAEPParameterSpec(
+                        "SHA-256",
+                        "MGF1",
+                        MGF1ParameterSpec.SHA256,
+                        PSource.PSpecified.DEFAULT
+                    )
+                )
+            }
+            val aesGcmKey = rsaCipher.unwrap(
+                encryptedAesGcmKey,
+                KeyProperties.KEY_ALGORITHM_RSA,
+                Cipher.SECRET_KEY
+            )
+
+            // Use all-zero 16 bytes long initialisation vector (IV)
+            val iv = ByteArray(16)
+
+            val publicKey = privateKey.derivePublicKey()
+            val publicKeyPKCS1 = publicKey.getAsn1Primitive()
+
+            // Use AES/GCM/NoPadding to encrypt the plaintext and generate a GCM tag
+            val aesGcmCipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+                init(
+                    Cipher.DECRYPT_MODE,
+                    aesGcmKey,
+                    GCMParameterSpec(16 * 8, iv)
+                )
+                // Use public key as authentication data for AES-GCM encryption
+                updateAAD(publicKeyPKCS1)
+            }
+
+            return aesGcmCipher.doFinal(encryptedDataAndGcmTag)
         }
         else -> throw IllegalArgumentException("Not supported algorithm")
     }
