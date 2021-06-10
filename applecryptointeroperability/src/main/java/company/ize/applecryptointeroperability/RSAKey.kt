@@ -7,6 +7,7 @@ import java.security.KeyFactory
 import java.security.PrivateKey
 import java.security.PublicKey
 import java.security.interfaces.RSAPrivateCrtKey
+import java.security.interfaces.RSAPublicKey
 import java.security.spec.RSAPrivateKeySpec
 import java.security.spec.RSAPublicKeySpec
 
@@ -51,8 +52,8 @@ fun PrivateKey.derivePublicKeySpec(): RSAPublicKeySpec =
  *
  * @see [derivePublicKeySpec]
  */
-fun PrivateKey.derivePublicKey(): PublicKey {
+fun PrivateKey.derivePublicKey(): RSAPublicKey {
     val keyFactory = KeyFactory.getInstance(KeyProperties.KEY_ALGORITHM_RSA)
     val publicKeySpec = derivePublicKeySpec()
-    return keyFactory.generatePublic(publicKeySpec)
+    return keyFactory.generatePublic(publicKeySpec) as RSAPublicKey
 }

@@ -255,10 +255,23 @@ fun SecKeyCreateDecryptedData(key: Key, algorithm: SecKeyAlgorithm, ciphertext: 
             val privateKey = key as? RSAPrivateKey ?: throw java.lang.IllegalArgumentException(
                 "Expected RSA private key"
             )
+            val publicKey = privateKey.derivePublicKey()
+            val publicKeyBitLength = publicKey.modulus.bitLength()
+
+            // 256bit AES key is used if RSA key is 4096bit or bigger,
+            // otherwise 128bit AES key is used.
+            val encryptedAesGcmKeyLength = if (publicKeyBitLength >= 4096) {
+                512
+            } else {
+                256
+            }
 
             // Extract the encrypted AES-GCM Secret Key, the encrypted data and the GCM tag
-            val encryptedAesGcmKey = ciphertext.copyOfRange(0, 256)
-            val encryptedDataAndGcmTag = ciphertext.copyOfRange(256, ciphertext.size)
+            val encryptedAesGcmKey = ciphertext.copyOfRange(0, encryptedAesGcmKeyLength)
+            val encryptedDataAndGcmTag = ciphertext.copyOfRange(
+                encryptedAesGcmKeyLength,
+                ciphertext.size
+            )
 
             // Unwrap/Decrypt AES GCM Key with private key
             val rsaCipher = Cipher.getInstance("RSA/ECB/OAEPPadding").apply {
@@ -282,7 +295,6 @@ fun SecKeyCreateDecryptedData(key: Key, algorithm: SecKeyAlgorithm, ciphertext: 
             // Use all-zero 16 bytes long initialisation vector (IV)
             val iv = ByteArray(16)
 
-            val publicKey = privateKey.derivePublicKey()
             val publicKeyPKCS1 = publicKey.getAsn1Primitive()
 
             // Use AES/GCM/NoPadding to encrypt the plaintext and generate a GCM tag

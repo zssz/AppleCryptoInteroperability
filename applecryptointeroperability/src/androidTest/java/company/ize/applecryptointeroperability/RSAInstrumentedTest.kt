@@ -9,20 +9,10 @@ import java.security.interfaces.RSAPublicKey
 class RSAInstrumentedTest {
     private val plaintext = "Hello, World!".toByteArray()
 
-    private val publicKey: RSAPublicKey
-    private val privateKey: RSAPrivateKey
-
-    init {
-        val keyPairGenerator = KeyPairGenerator.getInstance("RSA").apply {
-            initialize(2048)
-        }
-        val keyPair = keyPairGenerator.generateKeyPair()
-        publicKey = keyPair.public as RSAPublicKey
-        privateKey = keyPair.private as RSAPrivateKey
-    }
-
-    @Test
-    fun kSecKeyAlgorithmRSAEncryptionOAEPSHA256AESGCM() {
+    private fun kSecKeyAlgorithmRSAEncryptionOAEPSHA256AESGCM(
+        publicKey: RSAPublicKey,
+        privateKey: RSAPrivateKey
+    ) {
         // Encryption and decryption
         val encryptedData = SecKeyCreateEncryptedData(publicKey,
             SecKeyAlgorithm.RSA_ENCRYPTION_OAEP_SHA_256_AES_GCM, plaintext)
@@ -35,5 +25,29 @@ class RSAInstrumentedTest {
         val otherEncryptedData = SecKeyCreateEncryptedData(publicKey,
             SecKeyAlgorithm.RSA_ENCRYPTION_OAEP_SHA_256_AES_GCM, plaintext)
         Assert.assertFalse(otherEncryptedData.contentEquals(encryptedData))
+    }
+
+    @Test
+    fun kSecKeyAlgorithmRSAEncryptionOAEPSHA256AESGCM_RSA2048() {
+        val keyPairGenerator = KeyPairGenerator.getInstance("RSA").apply {
+            initialize(2048)
+        }
+        val keyPair = keyPairGenerator.generateKeyPair()
+        val publicKey = keyPair.public as RSAPublicKey
+        val privateKey = keyPair.private as RSAPrivateKey
+
+        kSecKeyAlgorithmRSAEncryptionOAEPSHA256AESGCM(publicKey, privateKey)
+    }
+
+    @Test
+    fun kSecKeyAlgorithmRSAEncryptionOAEPSHA256AESGCM_RSA4096() {
+        val keyPairGenerator = KeyPairGenerator.getInstance("RSA").apply {
+            initialize(4096)
+        }
+        val keyPair = keyPairGenerator.generateKeyPair()
+        val publicKey = keyPair.public as RSAPublicKey
+        val privateKey = keyPair.private as RSAPrivateKey
+
+        kSecKeyAlgorithmRSAEncryptionOAEPSHA256AESGCM(publicKey, privateKey)
     }
 }
