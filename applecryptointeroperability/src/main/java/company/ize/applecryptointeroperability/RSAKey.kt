@@ -4,9 +4,8 @@ import android.security.keystore.KeyProperties
 import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo
 import java.math.BigInteger
 import java.security.KeyFactory
-import java.security.PrivateKey
-import java.security.PublicKey
 import java.security.interfaces.RSAPrivateCrtKey
+import java.security.interfaces.RSAPrivateKey
 import java.security.interfaces.RSAPublicKey
 import java.security.spec.RSAPrivateKeySpec
 import java.security.spec.RSAPublicKeySpec
@@ -19,7 +18,7 @@ import java.security.spec.RSAPublicKeySpec
 /**
  * Return the default BER or DER encoding for this key.
  */
-fun PublicKey.getAsn1Primitive(): ByteArray = SubjectPublicKeyInfo
+fun RSAPublicKey.getAsn1Primitive(): ByteArray = SubjectPublicKeyInfo
     .getInstance(encoded)
     .parsePublicKey()
     .encoded
@@ -33,7 +32,7 @@ fun PublicKey.getAsn1Primitive(): ByteArray = SubjectPublicKeyInfo
  *
  * Note: This is not a fool proof solution and can only yield a probabilistic result
  */
-fun PrivateKey.derivePublicKeySpec(): RSAPublicKeySpec =
+fun RSAPrivateKey.derivePublicKeySpec(): RSAPublicKeySpec =
     if (this is RSAPrivateCrtKey) {
         RSAPublicKeySpec(this.modulus, this.publicExponent)
     } else {
@@ -52,7 +51,7 @@ fun PrivateKey.derivePublicKeySpec(): RSAPublicKeySpec =
  *
  * @see [derivePublicKeySpec]
  */
-fun PrivateKey.derivePublicKey(): RSAPublicKey {
+fun RSAPrivateKey.derivePublicKey(): RSAPublicKey {
     val keyFactory = KeyFactory.getInstance(KeyProperties.KEY_ALGORITHM_RSA)
     val publicKeySpec = derivePublicKeySpec()
     return keyFactory.generatePublic(publicKeySpec) as RSAPublicKey
