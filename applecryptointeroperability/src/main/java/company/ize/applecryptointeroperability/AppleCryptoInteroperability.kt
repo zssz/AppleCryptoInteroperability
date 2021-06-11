@@ -1,11 +1,18 @@
 package company.ize.applecryptointeroperability
 
+import android.security.keystore.KeyProperties
 import java.security.*
 import java.security.interfaces.ECPrivateKey
 import java.security.interfaces.ECPublicKey
+import java.security.interfaces.RSAPrivateKey
+import java.security.interfaces.RSAPublicKey
+import java.security.spec.MGF1ParameterSpec
 import javax.crypto.Cipher
 import javax.crypto.KeyAgreement
+import javax.crypto.KeyGenerator
 import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.OAEPParameterSpec
+import javax.crypto.spec.PSource
 import javax.crypto.spec.SecretKeySpec
 
 //  Created by Zsombor SZABO on 08/03/2019.
@@ -129,6 +136,62 @@ fun SecKeyCreateEncryptedData(key: Key, algorithm: SecKeyAlgorithm, plaintext: B
             // and the GCM tag
             return sharedInfo + encryptedDataAndGcmTag
         }
+        SecKeyAlgorithm.RSA_ENCRYPTION_OAEP_SHA_256_AES_GCM -> {
+            val publicKey = key as? RSAPublicKey ?: throw java.lang.IllegalArgumentException(
+                "Expected RSA public key")
+
+            val publicKeyBitLength = publicKey.modulus.bitLength()
+
+            // 256bit AES key is used if RSA key is 4096bit or bigger,
+            // otherwise 128bit AES key is used.
+            val aesKeyBitLength = if (publicKeyBitLength >= 4096) {
+                256
+            } else {
+                128
+            }
+
+            // Generate Random AES GCM session key
+            val secureRandom = SecureRandom.getInstanceStrong()
+            val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES).apply {
+                init(aesKeyBitLength, secureRandom)
+            }
+            val aesGcmKey = keyGenerator.generateKey()
+
+            // Use all-zero 16 bytes long initialisation vector (IV)
+            val iv = ByteArray(16)
+
+            // Use AES/GCM/NoPadding to encrypt the plaintext and generate a GCM tag
+            val aesGcmCipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+                init(
+                    Cipher.ENCRYPT_MODE,
+                    aesGcmKey,
+                    GCMParameterSpec(16 * 8, iv)
+                )
+                // Use public key as authentication data for AES-GCM encryption
+                updateAAD(publicKey.getAsn1Primitive())
+            }
+
+            val encryptedDataAndGcmTag = aesGcmCipher.doFinal(plaintext)
+
+            // Wrap/Encrypt AES GCM Key with public key
+            val rsaCipher = Cipher.getInstance("RSA/ECB/OAEPPadding").apply {
+                init(
+                    Cipher.WRAP_MODE,
+                    publicKey,
+                    OAEPParameterSpec(
+                        "SHA-256",
+                        "MGF1",
+                        MGF1ParameterSpec.SHA256,
+                        PSource.PSpecified.DEFAULT
+                    )
+                )
+            }
+            val encryptedAesGcmKey = rsaCipher.wrap(aesGcmKey)
+
+            // Construct the envelope by combining the encrypted AES key, the encrypted data
+            // and the GCM tag
+            return encryptedAesGcmKey + encryptedDataAndGcmTag
+        }
         else -> throw IllegalArgumentException("Not supported algorithm")
     }
 }
@@ -188,6 +251,65 @@ fun SecKeyCreateDecryptedData(key: Key, algorithm: SecKeyAlgorithm, ciphertext: 
 
             return cipher.doFinal(encryptedDataAndGcmTag)
         }
+        SecKeyAlgorithm.RSA_ENCRYPTION_OAEP_SHA_256_AES_GCM -> {
+            val privateKey = key as? RSAPrivateKey ?: throw java.lang.IllegalArgumentException(
+                "Expected RSA private key"
+            )
+            val publicKey = privateKey.derivePublicKey()
+            val publicKeyBitLength = publicKey.modulus.bitLength()
+
+            // 256bit AES key is used if RSA key is 4096bit or bigger,
+            // otherwise 128bit AES key is used.
+            val encryptedAesGcmKeyLength = if (publicKeyBitLength >= 4096) {
+                512
+            } else {
+                256
+            }
+
+            // Extract the encrypted AES-GCM Secret Key, the encrypted data and the GCM tag
+            val encryptedAesGcmKey = ciphertext.copyOfRange(0, encryptedAesGcmKeyLength)
+            val encryptedDataAndGcmTag = ciphertext.copyOfRange(
+                encryptedAesGcmKeyLength,
+                ciphertext.size
+            )
+
+            // Unwrap/Decrypt AES GCM Key with private key
+            val rsaCipher = Cipher.getInstance("RSA/ECB/OAEPPadding").apply {
+                init(
+                    Cipher.UNWRAP_MODE,
+                    privateKey,
+                    OAEPParameterSpec(
+                        "SHA-256",
+                        "MGF1",
+                        MGF1ParameterSpec.SHA256,
+                        PSource.PSpecified.DEFAULT
+                    )
+                )
+            }
+            val aesGcmKey = rsaCipher.unwrap(
+                encryptedAesGcmKey,
+                KeyProperties.KEY_ALGORITHM_RSA,
+                Cipher.SECRET_KEY
+            )
+
+            // Use all-zero 16 bytes long initialisation vector (IV)
+            val iv = ByteArray(16)
+
+            val publicKeyPKCS1 = publicKey.getAsn1Primitive()
+
+            // Use AES/GCM/NoPadding to encrypt the plaintext and generate a GCM tag
+            val aesGcmCipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+                init(
+                    Cipher.DECRYPT_MODE,
+                    aesGcmKey,
+                    GCMParameterSpec(16 * 8, iv)
+                )
+                // Use public key as authentication data for AES-GCM encryption
+                updateAAD(publicKeyPKCS1)
+            }
+
+            return aesGcmCipher.doFinal(encryptedDataAndGcmTag)
+        }
         else -> throw IllegalArgumentException("Not supported algorithm")
     }
 }
@@ -207,5 +329,16 @@ enum class SecKeyAlgorithm {
     and static public key data is used as authenticationData for AES-GCM processing.  AES-GCM uses 16 bytes long TAG, AES key
     is first half of KDF output and 16 byte long IV (initialization vector) is second half of KDF output.
      */
-    ECIES_ENCRYPTION_STANDARD_VARIABLE_IV_X963_SHA256_AES_GCM
+    ECIES_ENCRYPTION_STANDARD_VARIABLE_IV_X963_SHA256_AES_GCM,
+
+    /**
+     * kSecKeyAlgorithmRSAEncryptionOAEPSHA256AESGCM
+     *
+     * Randomly generated AES session key is encrypted by RSA with OAEP padding.
+     * User data are encrypted using session key in GCM mode with all-zero 16 bytes long IV (initialization vector).
+     * Finally 16 byte AES-GCM tag is appended to ciphertext.
+     * 256bit AES key is used if RSA key is 4096bit or bigger, otherwise 128bit AES key is used.
+     * Raw public key data is used as authentication data for AES-GCM encryption.
+     */
+    RSA_ENCRYPTION_OAEP_SHA_256_AES_GCM
 }
